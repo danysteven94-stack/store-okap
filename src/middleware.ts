@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySession } from "@/lib/auth";
+import { verifySession } from "@/lib/session";
 
 export async function middleware(req: NextRequest) {
   const token = req.cookies.get("session")?.value;
   const session = token ? await verifySession(token) : null;
 
-  const isDashboard = req.nextUrl.pathname.startsWith("/dashboard");
+  const isProtected = ["/dashboard", "/pos", "/products", "/contacts"].some(
+    (path) => req.nextUrl.pathname.startsWith(path)
+  );
   const isLogin = req.nextUrl.pathname.startsWith("/login");
 
-  if (isDashboard && !session) {
+  if (isProtected && !session) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
@@ -20,5 +22,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/login"],
+  matcher: ["/dashboard/:path*", "/pos/:path*", "/products/:path*", "/contacts/:path*", "/login"],
 };
