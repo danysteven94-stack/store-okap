@@ -1,148 +1,196 @@
-# Gady's — Gestion Multi-Business
+# Gadys Shop — Boutique en ligne connectée à Gadys Entreprise
 
-Application SaaS pour gérer plusieurs entreprises (ventes, achats, stocks, clients, fournisseurs, factures PDF, rapports) depuis un seul compte.
+**Phase 1 : fondations.** Projet Next.js 15 + Supabase séparé de Gadys
+Entreprise (multibiz-app), relié à lui par un connecteur API.
 
-**Entreprises gérées :** Gwo & Detay (gros/détail), Enpòtasyon Pwodwi (import),
-Manje/Patisri/Gato, Pwodwi Elektwonik, Pwodwi Streaming — configurables via
-`/api/businesses`, les 5 sont pré-remplies comme données de démonstration dans
-le tableau de bord.
+## ⚠️ À savoir avant de continuer
+
+Certaines intégrations demandées dans le cahier des charges initial ne sont
+**pas réalisables** techniquement, quelle que soit la qualité du code :
+
+- **Temu et Shein** n'ont aucune API publique permettant d'importer des
+  produits — aucune solution ne le permet légalement.
+- **Amazon** (Selling Partner API) exige d'avoir déjà un compte vendeur
+  Amazon approuvé — ce n'est pas une simple clé à obtenir.
+- **AliExpress / Alibaba** proposent une API d'affiliation (pour toucher une
+  commission sur des liens), pas une API pour importer un catalogue à
+  revendre soi-même.
+- **CJ Dropshipping** est la seule intégration de la liste qui dispose d'une
+  vraie API publique pour vendeurs — c'est celle qui est implémentée ici
+  (`src/lib/cj-dropshipping.ts`). Elle nécessite un compte CJ Dropshipping
+  avec accès API (email + clé API depuis leur tableau de bord).
+
+Le système est conçu pour qu'ajouter un futur fournisseur (import CSV manuel,
+ou une intégration s'ils ouvrent une API un jour) se fasse sans tout
+reconstruire : chaque produit a un `supplier_id` et un `external_id`.
 
 ## Stack
 
-- **Frontend** — Next.js 15 (App Router), React, TypeScript, Tailwind CSS
-- **Backend** — Next.js API Routes, Server Actions
-- **Base de données** — Upstash Redis
-- **Auth** — JWT (jose) + bcrypt, RBAC (admin / gestionnaire / caissier)
-- **Factures** — @react-pdf/renderer
-- **Hébergement** — Vercel
+Next.js 15 (App Router) · TypeScript · Tailwind CSS · Supabase (base de
+données + authentification clients) · Vercel.
 
-## Démarrage rapide
+## 1. Créer le projet Supabase
+
+1. Sur [supabase.com](https://supabase.com), créez un nouveau projet.
+2. Dans **SQL Editor**, collez et exécutez tout le contenu de
+   `supabase/schema.sql` — cela crée les 12 tables et active la sécurité RLS.
+3. Dans **Project Settings > API**, copiez `Project URL`, `anon public key`,
+   et `service_role key`.
+
+## 2. Installation locale
 
 ```bash
 npm install
-cp .env.example .env.local   # remplir les clés Upstash + JWT_SECRET
+cp .env.example .env.local
+```
+
+Renseignez dans `.env.local` les clés Supabase, et — si vous voulez tester
+le connecteur — l'URL de votre app Gadys Entreprise déployée et la clé
+`CONNECTOR_API_KEY` (générée côté Gadys Entreprise, voir plus bas).
+
+```bash
 npm run dev
 ```
 
-L'application démarre sur `http://localhost:3000`.
+## 3. Activer le connecteur côté Gadys Entreprise
 
-## Structure du projet
+Le connecteur est déjà ajouté au projet **multibiz-app** (Gadys Entreprise) :
 
-```
-src/
-  app/
-    (auth)/login/          → page de connexion
-    (dashboard)/dashboard/ → tableau de bord multi-entreprises + vue d'ensemble
-    (dashboard)/pos/       → système de vente (POS)
-    (dashboard)/products/  → gestion complète des produits & du stock
-    (dashboard)/contacts/  → gestion complète des clients & fournisseurs
-    verify/[saleId]/       → vérification publique d'une facture (lien QR code)
-    api/
-      auth/login/          → authentification
-      businesses/          → CRUD entreprises
-      products/            → CRUD produits (liste + création)
-      products/[id]/        → modifier / supprimer un produit
-      customers/, customers/[id]/ → CRUD clients
-      suppliers/, suppliers/[id]/ → CRUD fournisseurs
-      purchases/             → achats fournisseurs (entrée de stock automatique)
-      sales/                → POS / création de vente
-      expenses/             → dépenses par catégorie
-      dashboard/            → agrégation temps réel (profit = revenus − dépenses)
-      notifications/        → stock faible, nouvelle vente, grosse dépense
-      reports/               → ventes, stock, financier (export Excel)
-      backup/, backup/restore/, backup/cron/ → sauvegarde quotidienne
-      invoices/[saleId]/     → génération PDF (logo, QR code, signature)
-      invoices/send/          → envoi email (Resend) ou lien WhatsApp
-  components/
-    dashboard/              → BusinessSwitcher, StatCard, RevenueChart, BusinessBreakdown
-    pos/                     → Cart, BarcodeScanner
-    products/                → StockBar, ProductForm
-    contacts/                → ContactForm (clients & fournisseurs)
-    nav/                      → BottomNav, AppChrome (masque la nav sur /login, /verify)
-    providers/                → ThemeProvider (mode sombre)
-    ui/                      → composants réutilisables
-  lib/
-    i18n/                     → dictionary.ts (traductions), language-provider.tsx
-    upstash.ts               → client Redis + convention des clés
-    auth.ts                  → JWT, hashing, permissions RBAC
-    notifications.ts         → création de notifications automatiques
-    pdf/invoice.tsx           → template de facture PDF
-  types/                     → types partagés (Business, Product, Sale...)
-  middleware.ts               → protection des routes /dashboard
-scripts/
-  seed-admin.ts               → crée le premier utilisateur Administrateur
-```
+- `GET /api/connector/products?businessId=xxx` — expose le catalogue et le
+  stock actuel d'une entreprise.
+- `POST /api/connector/sales` — reçoit une commande du site et crée une
+  vraie vente dans Gadys Entreprise (déduit le stock, génère une facture,
+  compte dans les revenus/rapports — en réutilisant `createSale()` telle
+  quelle, donc aucune logique dupliquée).
 
-## Modèle de données Upstash
+Ces deux routes sont protégées par un en-tête `x-api-key`, **pas** par la
+session admin habituelle (puisque les appels viennent d'un serveur, pas d'un
+navigateur connecté). Pour les activer :
 
-Voir les commentaires dans `src/lib/upstash.ts` pour la convention de clés
-(`business:{id}`, `product:{id}`, `sale:{id}`, etc.).
+1. Dans les variables d'environnement du projet Vercel **multibiz-app**,
+   ajoutez `CONNECTOR_API_KEY` (générez une valeur avec
+   `openssl rand -base64 32`).
+2. Mettez la **même valeur** dans `GADYS_CONNECTOR_API_KEY` sur le projet
+   **gadys-shop**, et `GADYS_CONNECTOR_URL` = l'URL de production de
+   multibiz-app.
+3. Redéployez les deux projets.
 
-## Ce qui est déjà en place
+Testez avec la page `/admin/sync` (temporaire, voir limitations plus bas).
 
-- [x] Structure du projet et configuration Tailwind (palette forêt/or)
-- [x] Page de connexion + API `/api/auth/login`
-- [x] Middleware RBAC protégeant `/dashboard`
-- [x] Tableau de bord avec sélecteur multi-entreprises et KPIs (données de démo)
-- [x] API `/api/businesses` (liste + création)
-- [x] API `/api/products` (liste + création, calcul automatique du stock faible)
-- [x] API `/api/sales` (POS : création de vente, sortie de stock automatique)
-- [x] Génération de facture PDF professionnelle (`/api/invoices/[saleId]`) — logo,
-      infos entreprise/client, tableau produits, sous-total/remise/taxe/total,
-      **QR code de vérification** et ligne de signature numérique
-- [x] API `/api/expenses` (catégories: salaires, transport, loyer, électricité,
-      internet, divers)
-- [x] API `/api/dashboard` — agrège ventes + dépenses du jour et calcule le
-      profit net automatiquement (Profit = Revenus − Dépenses)
-- [x] Notifications automatiques (`src/lib/notifications.ts`) déclenchées sur
-      stock faible, nouvelle vente et dépense importante — lues via `/api/notifications`
-- [x] Rapport financier exportable en Excel (`/api/reports/financial?format=excel`)
-      sur une plage de dates, avec totaux
-- [x] Rapport de ventes détaillé (`/api/reports/sales`) — produits les plus
-      vendus, répartition par mode de paiement
-- [x] Rapport de stock (`/api/reports/stock`) — disponible / faible / rupture,
-      valeur totale du stock
-- [x] Sauvegarde automatique quotidienne (`/api/backup` + Vercel Cron à 4h du
-      matin via `vercel.json`) et restauration (`/api/backup/restore`, réservée
-      à l'Administrateur Principal)
-- [x] Envoi de facture par email (Resend) ou lien WhatsApp direct
-      (`/api/invoices/send`)
-- [x] Scanner de code-barres en temps réel via la caméra (`html5-qrcode`) —
-      composant `BarcodeScanner`
-- [x] Interface POS complète (`/pos`) — panier, taxe, choix du mode de paiement
-- [x] Graphiques de vente/profit sur 7 jours (`recharts`) sur le tableau de bord
-- [x] Page `/verify/[saleId]` liée au QR code des factures
-- [x] Vue d'ensemble "Tout Antrepriz" — chiffre d'affaires combiné, profit
-      total et répartition par entreprise (`BusinessBreakdown`)
-- [x] Script `npm run seed:admin` pour créer le premier utilisateur
-- [x] Page `/products` — gestion complète des produits & du stock : recherche,
-      filtre par catégorie, ajout/modification/suppression, barre de stock
-      colorée (anfòm / fèb / rupti), valeur totale du stock
-- [x] API `/api/products/[id]` (PATCH / DELETE) pour modifier ou supprimer
-      un produit individuel
-- [x] Page `/contacts` — gestion complète des clients ET fournisseurs (bascule
-      Kliyan/Founisè), historique de factures/achats par contact, ajout/
-      modification/suppression
-- [x] API `/api/customers`, `/api/suppliers` (+ `[id]` pour modifier/supprimer)
-- [x] API `/api/purchases` — achats auprès des fournisseurs, entrée de stock
-      automatique après validation, notification `new_purchase`
-- [x] **Mode sombre** — `ThemeProvider` (persisté + détection préférence
-      système), bascule dans la nav du bas, palette `dark-bg/surface/border`
-- [x] **Multi-langues (Kreyòl / Français / English)** — `LanguageProvider` +
-      dictionnaire (`src/lib/i18n/`), sélecteur dans la nav du bas. Le socle
-      (navigation, tableau de bord, produits, contacts) est traduit ; étendre
-      `dictionary.ts` pour couvrir le reste des écrans
-- [x] **Navigation en bas** (`BottomNav`) reliant Tableau de bord / Kès / Pwodwi
-      / Kontak — masquée sur `/login` et `/verify`
+## 4. Importer des produits CJ Dropshipping (optionnel)
 
-## Prochaines étapes suggérées
+Renseignez `CJ_EMAIL` et `CJ_API_KEY` (obtenus depuis votre compte CJ
+Dropshipping), puis utilisez `/admin/sync` pour chercher et importer des
+produits par mot-clé. Chaque import applique une marge de 50 % par défaut
+sur le prix CJ pour définir le prix de vente — ajustable dans le code
+(`markupPercent`).
 
-- [ ] Traduire les chaînes restantes (formulaires, POS, factures) via `dictionary.ts`
-- [ ] Déploiement Vercel + connexion GitHub
+## État d'avancement
 
-## Déploiement
+- [x] **Phase 1** — Projet Next.js + Supabase, schéma complet (12 tables),
+      authentification clients (Supabase Auth), page d'accueil et catalogue
+      publics (lecture depuis Supabase), connecteur API bidirectionnel
+      fonctionnel avec Gadys Entreprise, import CJ Dropshipping fonctionnel.
+- [x] **Phase 2** — Panier persistant (localStorage), page produit avec
+      ajout au panier, codes promo (table `coupons`, validation serveur),
+      checkout complet (revalidation des prix/stock côté serveur, jamais
+      confiance au navigateur), création de commande + articles + paiement +
+      facture, déduction du stock Supabase, synchronisation automatique vers
+      Gadys Entreprise pour les produits qui en proviennent, page de
+      confirmation avec téléchargement de facture, suivi des commandes pour
+      les clients connectés (`/compte/commandes`).
+- [x] **Phase 3** — Dashboard admin : authentification admin séparée des
+      comptes clients (table `users`), statistiques (ventes totales, revenus
+      du mois, clients, produits actifs, produits les plus vendus, dernières
+      commandes), gestion des commandes (filtrage par statut, changement de
+      statut, impression de facture PDF).
+- [x] **Phase 4** — Notifications : email de confirmation au client (Resend),
+      SMS de confirmation (Twilio), email à l'admin à chaque nouvelle
+      commande + badge de compteur dans le dashboard, alerte email quand le
+      stock d'un produit atteint son seuil minimum (déclenchée au checkout
+      et lors des synchronisations Gadys Entreprise).
+- [x] **Phase 5 (partielle)** — Gestion complète des produits depuis le
+      dashboard : créer/modifier/supprimer un produit, upload de plusieurs
+      photos (Supabase Storage), catégories et sous-catégories, SKU, prix
+      d'achat/vente/barré, stock et seuil d'alerte modifiables directement.
+- [x] **Phase 6** — Wishlist (liste d'envies persistante par client, page
+      `/compte/wishlist`), avis produits (note 1-5 + commentaire, un avis par
+      client par produit, moyenne affichée), SEO (métadonnées par produit,
+      `sitemap.xml`, `robots.txt`, Open Graph), PWA (manifest, icônes
+      générées, service worker basique pour un fonctionnement hors-ligne
+      minimal), sauvegarde automatique quotidienne (Vercel Cron) + manuelle
+      vers Supabase Storage, avec page admin dédiée.
 
-1. Pousser le projet sur GitHub
-2. Importer le repo sur [vercel.com](https://vercel.com)
-3. Ajouter les variables d'environnement (`.env.example`) dans les réglages du projet Vercel
-4. Créer une base Upstash Redis et copier les identifiants REST
+**Toutes les fonctionnalités du cahier des charges initial sont couvertes**,
+avec les limites honnêtes documentées ci-dessous (paiement non traité par un
+vrai processeur, notifications "best-effort", intégrations fournisseurs
+limitées par ce que leurs API permettent réellement).
+
+## Activer l'upload de photos produits
+
+Exécutez `supabase/migration_2_product_photos.sql` dans le SQL Editor de
+Supabase (une seule fois) — cela crée le bucket de stockage `product-images`
+et les règles de sécurité (upload réservé aux admins, lecture publique pour
+que les photos s'affichent sur le site). Sans cette migration, le bouton
+d'upload dans `/admin/produits` échouera.
+
+## Activer wishlist, avis produits et sauvegarde automatique
+
+Exécutez ensuite `supabase/migration_3_wishlist_reviews_backup.sql` (une
+seule fois) — crée les tables `wishlist_items` et `reviews`, ainsi que le
+bucket privé `backups`.
+
+Pour la sauvegarde automatique quotidienne, ajoutez `CRON_SECRET` dans les
+variables d'environnement Vercel (générez une valeur avec
+`openssl rand -base64 32`) — `vercel.json` déclare déjà la tâche cron
+quotidienne à 3h du matin.
+
+## Créer le premier compte administrateur
+
+Il n'y a volontairement **aucune page d'inscription admin publique** — un
+compte admin doit être créé manuellement :
+
+1. Dans Supabase, allez dans **Authentication > Users > Add user**, créez
+   l'utilisateur avec un email et un mot de passe.
+2. Copiez son `User UID`.
+3. Dans **SQL Editor**, exécutez :
+   ```sql
+   insert into users (auth_user_id, email, full_name, role)
+   values ('<UID copié>', 'admin@example.com', 'Administrateur', 'admin');
+   ```
+4. Connectez-vous sur `/admin/connexion` avec cet email/mot de passe.
+
+## ⚠️ Limitations connues de cette Phase 1 + 3 (à corriger avant mise en production)
+
+- **Le panier et le paiement n'existent pas encore** — la Phase 3 ajoute le
+  dashboard admin, mais le tunnel d'achat complet côté client reste la
+  Phase 2.
+- **Aucun email de confirmation n'est envoyé** — la facture est téléchargeable
+  immédiatement après la commande (page de confirmation), mais rien n'est
+  envoyé automatiquement par email ou SMS pour le moment (Phase 4).
+- **Le paiement n'est pas réellement traité** — le mode de paiement choisi
+  est enregistré (`payments.status = 'pending'`), mais aucune intégration
+  avec un vrai processeur de paiement (carte, MonCash, etc.) n'existe
+  encore. Pour l'instant, considérez ceci comme une prise de commande avec
+  paiement à confirmer manuellement (ex. à la livraison, ou par virement).
+- **Nouvelle table `coupons`** ajoutée au schéma — si votre base Supabase
+  date de la Phase 1, ré-exécutez `supabase/schema.sql` en entier : toutes
+  les instructions utilisent `if not exists`, donc c'est sans risque pour
+  vos données existantes.
+- **Les notifications (Phase 4) sont "best-effort"** — si Resend ou Twilio
+  ne sont pas configurés, ou si l'envoi échoue, la commande reste valide
+  quand même. Vérifiez les logs Vercel si un client signale ne rien avoir
+  reçu.
+- **Le stock CJ Dropshipping** est initialisé à une valeur arbitraire (999)
+  puisqu'en dropshipping il n'y a pas de stock physique local à suivre —
+  seul le fournisseur gère la disponibilité réelle.
+
+## Architecture du stock centralisé
+
+Gadys Entreprise (Upstash Redis) reste la **source de vérité** pour le stock
+des produits physiques gérés en boutique. Gadys Shop **reflète** cet état
+dans sa table `inventory` Supabase via la synchronisation
+`/api/sync/gadys-products` (à automatiser par un cron en Phase 2). Quand une
+vente se fait sur le site, `pushSaleToGadys()` notifie Gadys Entreprise, qui
+déduit le vrai stock — la prochaine synchronisation ramène l'état à jour des
+deux côtés.

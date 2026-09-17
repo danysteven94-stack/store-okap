@@ -1,43 +1,28 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
   darkMode: "class",
+  content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
   theme: {
     extend: {
       colors: {
-        ink: "#12332E",
-        paper: "#FAF9F6",
-        gold: {
-          DEFAULT: "#C08829",
-          light: "#E9C98B",
-          dark: "#8A5F17",
-        },
-        forest: {
-          DEFAULT: "#12332E",
-          light: "#1D5148",
-          muted: "#6B7B76",
-        },
-        brick: "#A8432B",
-        // Mode fonse — fon prèske nwa ak yon tint vèt fore, sifas kat yo yon ti
-        // jan pi klè pou kenbe yerachi vizyèl la san yo pa vin gri plat.
-        dark: {
-          bg: "#0E1917",
-          surface: "#152623",
-          border: "#22403A",
-        },
+        brand: {
+          red: "#C81E2C",
+          "red-dark": "#8F0F1B",
+          black: "#0B0B0D",
+          charcoal: "#1A1A1D",
+          white: "#FFFFFF",
+          gray: "#F4F4F5"
+        }
       },
       fontFamily: {
-        display: ["var(--font-display)", "serif"],
-        sans: ["var(--font-sans)", "sans-serif"],
-        mono: ["var(--font-mono)", "monospace"],
+        display: ["var(--font-display)", "sans-serif"],
+        body: ["var(--font-body)", "sans-serif"]
       },
-      borderRadius: {
-        card: "12px",
-      },
-    },
+      borderRadius: { xl: "0.85rem" }
+    }
   },
-  plugins: [],
+  plugins: []
 };
 
 export default config;

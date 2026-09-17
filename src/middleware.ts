@@ -1,26 +1,29 @@
-import { NextRequest, NextResponse } from "next/server";
-import { verifySession } from "@/lib/session";
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
 
-export async function middleware(req: NextRequest) {
-  const token = req.cookies.get("session")?.value;
-  const session = token ? await verifySession(token) : null;
+/** Rafraîchit la session Supabase à chaque requête (nécessaire avec @supabase/ssr). */
+export async function middleware(request: NextRequest) {
+  let response = NextResponse.next({ request });
 
-  const isProtected = ["/dashboard", "/pos", "/products", "/contacts"].some(
-    (path) => req.nextUrl.pathname.startsWith(path)
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll: () => request.cookies.getAll(),
+        setAll: (cookiesToSet) => {
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          response = NextResponse.next({ request });
+          cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+        }
+      }
+    }
   );
-  const isLogin = req.nextUrl.pathname.startsWith("/login");
 
-  if (isProtected && !session) {
-    return NextResponse.redirect(new URL("/login", req.url));
-  }
-
-  if (isLogin && session) {
-    return NextResponse.redirect(new URL("/dashboard", req.url));
-  }
-
-  return NextResponse.next();
+  await supabase.auth.getUser();
+  return response;
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/pos/:path*", "/products/:path*", "/contacts/:path*", "/login"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"]
 };
