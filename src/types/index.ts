@@ -130,4 +130,16 @@ export interface Review {
   comment: string | null;
   is_approved: boolean;
   created_at: string;
+ /* eslint-disable @typescript-eslint/no-explicit-any */
+export interface Business {
+  id: string;
+  name?: string;
+  [key: string]: any;
+}
+
+export interface Sale {
+  id: string;
+  [key: string]: any;
+}
+ 
 }
