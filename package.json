@@ -42,6 +42,7 @@
     "eslint": "^8.57.1",
     "eslint-config-next": "15.5.18",
     "@types/qrcode": "^1.5.5",
-    "@types/bcryptjs": "^2.4.6"
+    "@types/bcryptjs": "^2.4.6",
+"dotenv": "^16.4.5"
   }
 }
